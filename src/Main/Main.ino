@@ -52,8 +52,22 @@ void setup() {
 
   // CONNECT TO WIFI
   WiFiManager wifiManager;
-  //wifiManager.startConfigPortal("Coffee");
-  wifiManager.autoConnect("", "");
+
+  wifiManager.setTimeout(180);
+
+  //fetches ssid and pass and tries to connect
+  //if it does not connect it starts an access point
+  //and goes into a blocking loop awaiting configuration
+  if(!wifiManager.autoConnect()) {
+    Serial.println("failed to connect and hit timeout");
+    delay(3000);
+    //reset and try again, or maybe put it to deep sleep
+    ESP.reset();
+    delay(5000);
+  } 
+
+  //if you get here you have connected to the WiFi
+  Serial.println("connected...yeey :)");
 
   // CHANGE STATE AFTER SUCCESSFUL CONNECTION
   state = STATE_LOADED;
