@@ -4,6 +4,14 @@
 #include <DNSServer.h>
 #include <ESP8266WebServer.h>
 #include <WiFiManager.h>
+#include "ESP8266AWSImplementations.h"
+
+Esp8266HttpClient httpClient;
+Esp8266DateTimeProvider dateTimeProvider;
+
+//EEPROM
+#include <EEPROM.h>
+const int EEPROM_ADDRESS = 0;
 
 // AWS
 
@@ -11,7 +19,7 @@
 #include <ESP8266AWSImplementations.h>
 
 // LOGS 
-const int LOGS_ENABLED = false;
+const int LOGS_ENABLED = false; 
 
 // BUTTONS
 const int BUTTON_GREEN = 16;
@@ -38,6 +46,11 @@ int stateChanged = false;
 void setup() {
   // INITIALIZE SERIAL
   Serial.begin(9600);
+
+  // INITIALIZE EEPROM
+  EEPROM.begin(4);
+  Serial.print("EEPROM: ");
+  Serial.println(EEPROM.read(0));
 
   // INITIALIZE I/O
   pinMode(LED_BUILTIN, OUTPUT);
@@ -68,20 +81,36 @@ void setup() {
 
   //if you get here you have connected to the WiFi
   Serial.println("connected...yeey :)");
-
+  delay(10);
+  
   // CHANGE STATE AFTER SUCCESSFUL CONNECTION
-  state = STATE_LOADED;
+  state = initializeState();
+
+  Serial.print("state: ");
+  Serial.println(state);
   
   // UPDATE LED STATE
   updateLED();
 }
+
+
+
 void loop() {
   // INITIALIZE STATE MONITOR
   stateChanged = false;
   
   // READ BUTTON STATES
   int button_have_state = digitalRead(BUTTON_GREEN);
+  if(button_have_state == HIGH){
+    delay(300);
+    button_have_state = digitalRead(BUTTON_GREEN);
+  }
+  
   int button_havent_state = digitalRead(BUTTON_RED);
+  if(button_havent_state == HIGH){
+    delay(300);
+    button_havent_state = digitalRead(BUTTON_RED);
+  }
 
   // LOGS
   if (LOGS_ENABLED) {
@@ -105,12 +134,17 @@ void loop() {
   }
 
   if (stateChanged) {
+   
     // UPDATE LED STATE
     setLEDBlue();
     
     // SEND MESSAGE TO SNS
-    sendMessage();
-    
+    if(!sendMessage()){
+      saveState(STATE_LOADED);
+      ESP.reset();
+    }
+   
+    saveState(state);
     // UPDATE LED STATE
     updateLED();
   }
@@ -118,11 +152,10 @@ void loop() {
 
 // MESSAGING FUNCTIONS
 
-void sendMessage() {
-  Esp8266HttpClient httpClient;
-  Esp8266DateTimeProvider dateTimeProvider;
+bool sendMessage() {
+  
   ActionError actionError;
-
+  
   AmazonSNSClient snsClient;
   snsClient.setAWSRegion("sa-east-1");
   snsClient.setAWSEndpoint("amazonaws.com");
@@ -130,6 +163,7 @@ void sendMessage() {
   snsClient.setAWSSecretKey("");
   snsClient.setHttpClient(&httpClient);
   snsClient.setDateTimeProvider(&dateTimeProvider);
+  
 
   PublishInput publishInput;
   publishInput.setTargetArn("arn:aws:sns:sa-east-1:371355836815:bc-coffe-notify");
@@ -147,9 +181,10 @@ void sendMessage() {
   snprintf(message, sizeof message, "{\"type\":\"BUTTON\",\"data\":{\"hasCoffee\":%s,\"location\":\"%s\"}}", hasCoffee, location);
   
   publishInput.setMessage(message);
-
+  
   PublishOutput result = snsClient.publish(publishInput, actionError);
-
+  
+  
   Serial.print("Action error: ");
   Serial.println(actionError);
   Serial.print("Message ID: ");
@@ -158,6 +193,11 @@ void sendMessage() {
   Serial.println(result.getErrorType().getCStr());
   Serial.print("Error message: ");
   Serial.println(result.getErrorMessage().getCStr());
+
+  if(actionError > 0){
+    return false;
+  }
+  return true;
 }
 
 // LED FUNCTIONS
@@ -204,4 +244,21 @@ void setLEDGreen() {
   digitalWrite(LED_BLUE,LOW);
   digitalWrite(LED_GREEN,HIGH);
   digitalWrite(LED_RED,LOW);
+}
+
+void saveState(int state){
+  EEPROM.write(EEPROM_ADDRESS, state);
+  EEPROM.commit();
+}
+
+int getState(){
+  return EEPROM.read(EEPROM_ADDRESS);
+}
+
+int initializeState(){
+  int state = getState();
+  if(state < 4 && state >= 0){
+    return state;
+  }
+  return STATE_LOADED;
 }
